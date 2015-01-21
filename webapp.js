@@ -66,6 +66,21 @@
             }
         },
         onRequest: function(request) {
+
+            var uri = request.uri;
+
+            // if uri filter is provided, pass uri to it and use returned value as uri
+            if (typeof this.opts.uriFilter == 'function') {
+                uri = this.opts.uriFilter(uri);
+            }
+
+            // if default option is provided, intercept root directory request and server default instead
+            if (uri == '/' && this.opts.default) {
+                uri = '/' + this.opts.default;
+            }
+
+            request.uri = request.path = request.origpath = uri;
+
             console.log('handle',request.method, request.uri)
             for (var i=0; i<this.handlersMatch.length; i++) {
                 var re = this.handlersMatch[i][0]
@@ -169,7 +184,7 @@
     }
     _.extend(FileSystem.prototype, {
         getByPath: function(path, callback) {
-            if (path == '/') { 
+            if (path == '/') {
                 callback(this.entry)
                 return
             }

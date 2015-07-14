@@ -11,11 +11,18 @@
             this.handlersMatch.push( [new RegExp(repat), this.handlers[i][1]] )
         }
 
-        this.host = opts.host || '127.0.0.1'
+        if (getchromeversion() >= 44) {
+            this.host = opts.host || '0.0.0.0'
+        } else {
+            this.host = opts.host || '127.0.0.1'
+        }
         this.port = opts.port
         this.sockInfo = null
         this.lasterr = null
         this.stopped = false
+        this.starting = false
+        this.started = false
+        this.streams = {}
     }
 
     WebApplication.prototype = {
@@ -24,21 +31,63 @@
             this.lasterr = data
         },
         stop: function() {
-            sockets.tcp.disconnect(this.sockInfo.socketId)
+            this.started = false
+            chrome.sockets.tcpServer.disconnect(this.sockInfo.socketId, this.onDisconnect.bind(this))
+            for (var key in this.streams) {
+                this.streams[key].close()
+            }
+            // also disconnect any open connections...
+
+        },
+        onClose: function(info) {
+            var err = chrome.runtime.lastError
+            if (err) { console.warn(err) }
             this.stopped = true
+            this.started = false
+            console.log('tcpserver onclose',info)
+        },
+        onDisconnect: function(info) {
+            var err = chrome.runtime.lastError
+            if (err) { console.warn(err) }
+            this.stopped = true
+            this.started = false
+            console.log('tcpserver ondisconnect',info)
+            if (this.sockInfo) {
+                chrome.sockets.tcpServer.close(this.sockInfo.socketId, this.onClose.bind(this))
+            }
+        },
+        onStreamClose: function(stream) {
+            console.assert(stream.sockId)
+            delete this.streams[stream.sockId]
         },
         start: function() {
+            if (this.starting || this.started) { return }
+            this.stopped = false
+            this.starting = true
+
+            chrome.system.network.getNetworkInterfaces( function(result) {
+                if (result) {
+                    for (var i=0; i<result.length; i++) {
+                        if (result[i].prefixLength == 24) {
+                            console.log('found interface address: ' + result[i].address)
+                        }
+                    }
+                }
+            })
+
             sockets.tcpServer.create({name:"listenSocket"},function(sockInfo) {
                 this.sockInfo = sockInfo
                 sockets.tcpServer.listen(this.sockInfo.socketId,
                                          this.host,
                                          this.port,
                               function(result) {
+                                  this.starting = false
                                   if (result < 0) {
                                       this.error({message:'unable to bind to port',
                                                   errno:result})
                                   } else {
-                                      console.log('Listening on',this.port,result)
+                                      this.started = true
+                                      console.log('Listening on','http://'+ this.host + ':' + this.port)
                                       this.bindAcceptCallbacks()
                                   }
                               }.bind(this))
@@ -57,6 +106,8 @@
             if (acceptInfo.socketId) {
                 //var stream = new IOStream(acceptInfo.socketId)
                 var stream = new IOStream(acceptInfo.clientSocketId)
+                this.streams[acceptInfo.clientSocketId] = stream
+                stream.addCloseCallback(this.onStreamClose.bind(this))
                 var connection = new HTTPConnection(stream)
                 connection.addRequestCallback(this.onRequest.bind(this))
                 connection.tryRead()
@@ -88,6 +139,7 @@
                 if (reresult) {
                     var cls = this.handlersMatch[i][1]
                     var requestHandler = new cls(request)
+                    requestHandler.app = this
                     requestHandler.request = request
                     var handlerMethod = requestHandler[request.method.toLowerCase()]
                     if (handlerMethod) {
@@ -97,6 +149,12 @@
                 }
             }
             console.error('unhandled request',request)
+            // create a default handler...
+            var handler = new BaseHandler(request)
+            handler.app = this
+            handler.request = request
+            handler.write("Unhandled request", 404)
+            handler.finish()
         }
     }
 

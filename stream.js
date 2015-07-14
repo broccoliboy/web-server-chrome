@@ -26,13 +26,28 @@
 
         this.remoteclosed = false
         this.closed = false
+
+        this.halfclose = null
         this.onclose = null
+        this._close_callbacks = []
 
         this.onWriteBufferEmpty = null
         chrome.sockets.tcp.setPaused(this.sockId, false, this.onUnpaused.bind(this))
     }
 
     IOStream.prototype = {
+        addCloseCallback: function(cb) {
+            this._close_callbacks.push(cb)
+        },
+        removeCloseCallback: function(cb) {
+            debugger
+        },
+        runCloseCallbacks: function() {
+            for (var i=0; i<this._close_callbacks.length; i++) {
+                this._close_callbacks[i](this)
+            }
+            if (this.onclose) { this.onclose() }
+        },
         onUnpaused: function(info) {
             //console.log('sock unpaused',info)
         },
@@ -61,13 +76,20 @@
             var data = this.writeBuffer.consume_any_max(4096)
             //console.log(this.sockId,'tcp.send',data.byteLength)
             sockets.tcp.send( this.sockId, data, this.onWrite.bind(this, callback) )
-            //console.log(this.sockId,'tryWrite, lasterr',chrome.runtime.lastError)
         },
         onWrite: function(callback, evt) {
+            var err = chrome.runtime.lastError
+            if (err) {
+                console.log('socket.send lastError',err)
+                this.tryClose()
+                return
+            }
+
             // look at evt!
             if (evt.bytesWritten <= 0) {
                 console.log('onwrite fail, closing',evt)
                 this.close()
+                return
             }
             this.writing = false
             if (this.writeBuffer.size() > 0) {
@@ -87,7 +109,6 @@
                 this.log('remote closed connection (halfduplex)')
                 this.remoteclosed = true
                 if (this.halfclose) { this.halfclose() }
-                //if (this.onclose) { this.onclose() } // not really closed..
                 if (this.request) {
                     // do we even have a request yet? or like what to do ...
                 }
@@ -127,15 +148,13 @@
             }
         },
         close: function() {
-            if (this.onclose) { this.onclose() }
+            this.runCloseCallbacks()
             console.log('tcp sock close',this.sockId)
             delete peerSockMap[this.sockId]
             sockets.tcp.disconnect(this.sockId)
-            if (chrome.runtime.lastError) {
-                debugger
-            }
             //this.sockId = null
             this.closed = true
+            this.cleanup()
         },
         error: function(data) {
             console.warn(this.sockId,'closed')
@@ -144,16 +163,25 @@
             if (! this.closed) {
                 this.close()
             }
-
+        },
+        checkedCallback: function(callback) {
+            var err = chrome.runtime.lastError;
+            if (err) {
+                console.warn('socket callback lastError',err,callback)
+            }
         },
         tryClose: function(callback) {
+            if (!callback) { callback=this.checkedCallback }
             if (! this.closed) {
                 console.warn('cant close, already closed')
+                this.cleanup()
                 return
             }
             console.log(this.sockId,'tryClose')
             sockets.tcp.send(this.sockId, new ArrayBuffer, callback)
-            console.log(this.sockId,'tryClose, lasterr',chrome.runtime.lastError)
+        },
+        cleanup: function() {
+            this.writeBuffer = new Buffer
         }
     }
 

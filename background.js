@@ -4,7 +4,7 @@ function reload() { chrome.runtime.reload() }
 
 chrome.runtime.onSuspend.addListener( function(evt) {
     console.error('onSuspend',evt)
-    app.stop()
+    if (app) app.stop()
 })
 chrome.runtime.onSuspendCanceled.addListener( function(evt) {
     console.error('onSuspendCanceled',evt)
@@ -16,17 +16,20 @@ chrome.app.window.onClosed.addListener(function(evt) {
 
 chrome.app.runtime.onLaunched.addListener(function(launchData) {
     console.log('onLaunched with launchdata',launchData)
+
     var info = {type:'onLaunched',
                 launchData: launchData}
     var opts = {id:'index'}
-    chrome.app.window.create('index.html',
+    var page = 'index.html'
+    //var page = 'polymer/index.html'
+    chrome.app.window.create(page,
                              opts,
                              function(mainWindow) {
                                  window.mainWindow = mainWindow;
 			     });
     //console.log('launched')
 
-
+    if (window.app) { console.log('already have webapp',app); return }
 
     function MainHandler() {
         BaseHandler.prototype.constructor.call(this)
@@ -41,15 +44,23 @@ chrome.app.runtime.onLaunched.addListener(function(launchData) {
         MainHandler.prototype[key] = BaseHandler.prototype[key]
     }
 
-
-
     var handlers = [
 //        ['.*', MainHandler]
 //        ['.*', PackageFilesHandler]
         ['.*', DirectoryEntryHandler]
     ]
 
-    var app = new chrome.WebApplication({handlers:handlers, port:8887})
+    chrome.system.network.getNetworkInterfaces( function(result) {
+	if (result) {
+	    for (var i=0; i<result.length; i++) {
+		console.log('network interface:',result[i])
+	    }
+
+	}
+    })
+
+    // TODO -- auto free port discovery
+    window.app = new chrome.WebApplication({handlers:handlers, port:8887, renderIndex:false})
     app.start()
 });
 

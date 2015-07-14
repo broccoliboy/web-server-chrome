@@ -1,3 +1,13 @@
+function getchromeversion() {
+    var version
+    var match = navigator.userAgent.match(/Chrome\/([\d]+)/)
+    if (match) {
+        var version = parseInt(match[1])
+    }
+    return 44
+    return version
+}
+
 if (! String.prototype.endsWith) {
     String.prototype.endsWith = function(substr) {
         for (var i=0; i<substr.length; i++) {
@@ -76,6 +86,7 @@ if (! String.prototype.startsWith) {
     window.entryFileCache = new EntryCache
 
 function recursiveGetEntry(filesystem, path, callback) {
+    // XXX duplication with jstorrent
     var cacheKey = filesystem.filesystem.name +
         filesystem.fullPath +
         '/' + path.join('/')
@@ -110,6 +121,8 @@ function recursiveGetEntry(filesystem, path, callback) {
                 state.path = _.clone(path)
                 e.getFile(path.shift(), {create:false}, recurse, recurse)
             }
+        } else if (e.name == 'NotFoundError') {
+            callback({error:e.name, message:e.message})
         } else {
             callback({error:'file exists'})
         }
